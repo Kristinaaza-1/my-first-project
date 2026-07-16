@@ -1,4 +1,4 @@
-"""Точка входа: запуск Telegram-бота (long polling)."""
+"""Точка входа: запуск Telegram-бота (long polling) + WhatsApp webhook-сервера (если настроен)."""
 import asyncio
 import logging
 import sys
@@ -20,20 +20,25 @@ logging.basicConfig(
 
 from telegram.ext import Application, CallbackQueryHandler, MessageHandler, filters
 
-from config import TELEGRAM_BOT_TOKEN
+from config import PORT, TELEGRAM_BOT_TOKEN, WHATSAPP_INTEGRATION_ENABLED
 from handlers.booking_callback import handle_booking_decision
-from handlers.message_handler import handle_client_message
+from handlers.message_handler import handle_client_message, set_bot
 
 
-def main() -> None:
-    # Python 3.14 больше не создаёт event loop автоматически в главном потоке —
-    # python-telegram-bot этого ожидает, так что создаём его сами явно.
-    try:
-        asyncio.get_event_loop()
-    except RuntimeError:
-        asyncio.set_event_loop(asyncio.new_event_loop())
+async def run_whatsapp_server() -> None:
+    from aiohttp import web
 
-    # Увеличенные таймауты — по умолчанию (5с) иногда не хватает на медленном/нестабильном соединении.
+    from handlers.whatsapp_webhook import create_whatsapp_app
+
+    app = create_whatsapp_app()
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
+    logging.info("WhatsApp webhook слушает на порту %s", PORT)
+
+
+async def main() -> None:
     application = (
         Application.builder()
         .token(TELEGRAM_BOT_TOKEN)
@@ -46,13 +51,29 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_client_message))
     application.add_handler(CallbackQueryHandler(handle_booking_decision))
 
-    logging.info("Бот запущен, ждёт сообщения...")
-    application.run_polling()
+    set_bot(application.bot)
+
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling()
+    logging.info("Telegram-бот запущен, ждёт сообщения...")
+
+    if WHATSAPP_INTEGRATION_ENABLED:
+        await run_whatsapp_server()
+    else:
+        logging.info("WhatsApp не настроен — работаю только с Telegram.")
+
+    try:
+        await asyncio.Event().wait()  # держим процесс живым бесконечно
+    finally:
+        await application.updater.stop()
+        await application.stop()
+        await application.shutdown()
 
 
 if __name__ == "__main__":
     try:
-        main()
+        asyncio.run(main())
     except Exception:
         traceback.print_exc()
         sys.stderr.flush()
