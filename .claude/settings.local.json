@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Start-Process \"c:\\\\Users\\\\Kristina\\\\OneDrive\\\\Documenti\\\\Projects\\\\my-first-project\\\\landing.html\")"
+    ]
+  }
+}

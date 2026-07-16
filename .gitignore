@@ -1,0 +1,5 @@
+ai-assistant/.env
+ai-assistant/service_account.json
+__pycache__/
+*.pyc
+.railway/
